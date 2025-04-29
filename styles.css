@@ -1,0 +1,345 @@
+:root {
+    --bg-primary: #050510;
+    --bg-secondary: #0a0a1f80;
+    --text-primary: #f5f5f7;
+    --text-secondary: #99ade7;
+    --border-color: #22233a;
+    --link-color: #8be9fd;
+    --card-bg: #1a1b4c96;
+    --transition-duration: 0.5s;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    transition: background-color var(--transition-duration) ease,
+                color var(--transition-duration) ease,
+                border-color var(--transition-duration) ease,
+                box-shadow var(--transition-duration) ease;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    line-height: 1.6;
+    padding: 2rem;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    transition: background-color 0.3s ease, color 0.3s ease;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+}
+
+#app {
+    max-width: 800px;
+    margin: 2rem auto;
+    background: var(--bg-secondary);
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    position: relative;
+    z-index: 1;
+    backdrop-filter: blur(0.1px);
+    border: 1px solid var(--border-color);
+    min-height: calc(100vh - 4rem);
+    display: flex;
+    flex-direction: column;
+}
+
+canvas {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    z-index: -1;
+    pointer-events: all;
+    touch-action: none;
+    will-change: transform;
+    backface-visibility: hidden;
+}
+
+header {
+    margin-bottom: 2rem;
+    text-align: center;
+}
+
+.profile-info {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 2rem;
+    margin-bottom: 2rem;
+    align-items: start;
+}
+
+.avatar {
+    width: 200px;
+    height: 200px;
+    object-fit: cover;
+    border-radius: 50%;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.stat-box {
+    background: var(--card-bg);
+    padding: 1rem;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.repositories {
+    margin-top: 2rem;
+}
+
+.repos-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.repo-card {
+    background: var(--card-bg);
+    padding: 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    will-change: transform;
+}
+
+.repo-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.repo-card h4 {
+    margin-bottom: 0.5rem;
+}
+
+.repo-card a {
+    color: var(--link-color);
+    text-decoration: none;
+}
+
+.repo-card a:hover {
+    text-decoration: underline;
+}
+
+.repo-card p {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+}
+
+.repo-stats {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.repo-stats span {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.extra-info {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--card-bg);
+    border-radius: 8px;
+}
+
+.extra-info p {
+    margin: 0.5rem 0;
+    color: var(--text-primary);
+}
+
+.repo-dates {
+    margin-top: 0.5rem;
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.theme-switch {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.three-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    z-index: 0;
+    background: linear-gradient(to bottom, #050510, #0a0a2a);
+}
+
+.three-container canvas {
+    position: absolute !important;
+    width: 100% !important;
+    height: 100% !important;
+    outline: none;
+    cursor: grab;
+}
+
+.three-container canvas:active {
+    cursor: grabbing;
+}
+
+.map-controls {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    display: flex;
+    gap: 0.5rem;
+    z-index: 2;
+}
+
+.map-controls button {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+}
+
+.loading {
+    text-align: center;
+    padding: 2rem;
+    animation: pulse 1.5s infinite;
+}
+
+.error {
+    text-align: center;
+    padding: 2rem;
+    color: #ff6b6b;
+    background: rgba(255, 107, 107, 0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 107, 107, 0.2);
+}
+
+@keyframes pulse {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
+}
+
+@media (max-width: 1024px) {
+    #app {
+        max-width: 95%;
+    }
+}
+
+@media (max-width: 768px) {
+    body {
+        padding: 1rem;
+    }
+
+    #app {
+        padding: 1rem;
+        margin: 1rem auto;
+        padding: 1.5rem;
+    }
+
+    .profile-info {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        text-align: center;
+    }
+
+    .avatar {
+        max-width: 200px;
+        margin: 0 auto;
+        display: block;
+    }
+
+    .repos-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .theme-switch {
+        top: auto;
+        bottom: 1rem;
+        right: 1rem;
+    }
+
+    .map-controls {
+        bottom: 1rem;
+        right: 1rem;
+    }
+
+    .extra-info {
+        margin: 1rem auto;
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    .stats {
+        grid-template-columns: 1fr;
+        margin: 1rem -0.5rem;
+    }
+
+    .repo-stats {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .repo-dates {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    body {
+        padding: 0.5rem;
+    }
+    
+    #app {
+        margin: 0.5rem auto;
+        padding: 1rem;
+        border-radius: 4px;
+    }
+    
+    .map-controls {
+        flex-direction: column;
+    }
+
+    .avatar {
+        width: 150px;
+        height: 150px;
+    }
+
+    .stat-box {
+        padding: 0.75rem;
+        font-size: 0.9rem;
+    }
+}
+
+@media (orientation: landscape) and (max-height: 600px) {
+    #app {
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+}
