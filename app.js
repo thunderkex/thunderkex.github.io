@@ -1,6 +1,4 @@
-import ThreeMap from './three-map.js';
-
-let threeMap;
+import { paperAirplaneFlight } from './js/paperAirplaneFlight.js';
 
 async function fetchGitHubProfile() {
     const profileContent = document.getElementById('profile-content');
@@ -110,12 +108,6 @@ async function fetchGitHubProfile() {
     }
 }
 
-function initThreeJS() {
-    threeMap = new ThreeMap();
-}
-
-// Initialize everything
-initThreeJS();
 fetchGitHubProfile();
 
 // Add styles

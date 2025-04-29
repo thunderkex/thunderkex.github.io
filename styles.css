@@ -222,7 +222,7 @@ header {
     padding: 0.5rem;
     border-radius: 4px;
     cursor: pointer;
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(0.1px);
 }
 
 .loading {
