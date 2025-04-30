@@ -1,4 +1,14 @@
-import { paperAirplaneFlight } from './js/paperAirplaneFlight.js';
+import { init } from './js/paperAirplaneFlight.js';
+
+const app = document.getElementById('app');
+const profileButton = document.getElementById('profileButton');
+
+profileButton.addEventListener('click', () => {
+    app.style.display = app.style.display === 'none' ? 'block' : 'none';
+    if (app.style.display === 'block') {
+        fetchGitHubProfile();
+    }
+});
 
 async function fetchGitHubProfile() {
     const profileContent = document.getElementById('profile-content');
@@ -108,7 +118,7 @@ async function fetchGitHubProfile() {
     }
 }
 
-fetchGitHubProfile();
+init();
 
 // Add styles
 const styles = `
