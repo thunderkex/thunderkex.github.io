@@ -5,16 +5,23 @@ import { RenderPass } from 'https://unpkg.com/three@0.158.0/examples/jsm/postpro
 import { UnrealBloomPass } from 'https://unpkg.com/three@0.158.0/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 let scene, camera, renderer, controls, composer;
+let billboard, rain, rainCount;
 let airplane, buildings = [];
 let clock = new THREE.Clock();
 let wind = new THREE.Vector3();
 let holograms = [];
 let starField;
 let isPlaying = false;
-let mousePosition = new THREE.Vector2();
 let targetPosition = new THREE.Vector3();
 let vehicles = [];
 let roads = [];
+let trail;
+
+let gravity = new THREE.Vector3(0, -0.05, 0);
+let airDensity = 0.1;
+let wingArea = 2.0;
+let liftCoefficient = 1.2;
+let dragCoefficient = 0.1;
 
 export function init() {
     scene = new THREE.Scene();
@@ -35,6 +42,38 @@ export function init() {
     scene.add(spotlight);
     scene.add(spotlight.target);
 
+    // Create particle trail
+    const trailParticleCount = 100;
+    const trailGeometry = new THREE.BufferGeometry();
+    const trailPositions = new Float32Array(trailParticleCount * 3);
+    trailGeometry.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+
+    const trailMaterial = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.2, transparent: true, opacity: 0.6 });
+    trail = new THREE.Points(trailGeometry, trailMaterial);
+    scene.add(trail);
+
+    // Neon billboard animation
+    const billboardTexture = new THREE.TextureLoader().load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/sprites/spark1.png');
+    const billboardMaterial = new THREE.SpriteMaterial({ map: billboardTexture, color: 0x00ffcc, transparent: true, opacity: 1 });
+    const billboard = new THREE.Sprite(billboardMaterial);
+    billboard.scale.set(10, 5, 1);
+    billboard.position.set(0, 20, -20);
+    scene.add(billboard);
+
+    // Rain particle system
+    const rainCount = 1000;
+    const rainGeometry = new THREE.BufferGeometry();
+    const rainPositions = new Float32Array(rainCount * 3);
+    for (let i = 0; i < rainCount; i++) {
+        rainPositions[i * 3] = Math.random() * 200 - 100;
+        rainPositions[i * 3 + 1] = Math.random() * 100;
+        rainPositions[i * 3 + 2] = Math.random() * 200 - 100;
+    }
+    rainGeometry.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+
+    const rainMaterial = new THREE.PointsMaterial({ color: 0xaaaaee, size: 0.1, transparent: true, opacity: 0.6 });
+    const rain = new THREE.Points(rainGeometry, rainMaterial);
+    scene.add(rain);
 
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -444,6 +483,30 @@ function initializeVehicles() {
 
         vehicles.push(vehicle);
         scene.add(trail);
+
+    // Neon billboard animation
+    const billboardTexture = new THREE.TextureLoader().load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/sprites/spark1.png');
+    const billboardMaterial = new THREE.SpriteMaterial({ map: billboardTexture, color: 0x00ffcc, transparent: true, opacity: 1 });
+    const billboard = new THREE.Sprite(billboardMaterial);
+    billboard.scale.set(10, 5, 1);
+    billboard.position.set(0, 20, -20);
+    scene.add(billboard);
+
+    // Rain particle system
+    const rainCount = 1000;
+    const rainGeometry = new THREE.BufferGeometry();
+    const rainPositions = new Float32Array(rainCount * 3);
+    for (let i = 0; i < rainCount; i++) {
+        rainPositions[i * 3] = Math.random() * 200 - 100;
+        rainPositions[i * 3 + 1] = Math.random() * 100;
+        rainPositions[i * 3 + 2] = Math.random() * 200 - 100;
+    }
+    rainGeometry.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+
+    const rainMaterial = new THREE.PointsMaterial({ color: 0xaaaaee, size: 0.1, transparent: true, opacity: 0.6 });
+    const rain = new THREE.Points(rainGeometry, rainMaterial);
+    scene.add(rain);
+
     }
 }
 
@@ -466,96 +529,6 @@ function updateVehicles() {
     });
 }
 
-window.addEventListener('mousemove', (event) => {
-    if (isPlaying) {
-        mousePosition.x = (event.clientX / window.innerWidth) * 2 - 1;
-        mousePosition.y = -(event.clientY / window.innerHeight) * 2 + 1;
-    }
-});
-
-export function setPlayMode(mode) {
-    isPlaying = mode;
-    if (isPlaying) {
-        controls.enabled = false;
-        resetGame();
-    } else {
-        controls.enabled = true;
-    }
-}
-
-function resetGame() {
-    airplane.position.set(0, 30, 0);
-    airplane.velocity = new THREE.Vector3(0, 0, 0);
-    airplane.rotation.set(0, 0, 0);
-    
-    // Reset camera position higher and further back
-    camera.position.set(150, 100, 0);
-    camera.lookAt(airplane.position);
-}
-
-function checkCollision() {
-    const airplaneBox = new THREE.Box3().setFromObject(airplane);
-    
-    for (const building of buildings) {
-        const buildingBox = new THREE.Box3().setFromObject(building);
-        if (airplaneBox.intersectsBox(buildingBox)) {
-            // Create explosion effect
-            createExplosionEffect(airplane.position);
-            return true;
-        }
-    }
-    return false;
-}
-
-function createExplosionEffect(position) {
-    const particleCount = 50;
-    const geometry = new THREE.BufferGeometry();
-    const vertices = [];
-    
-    for (let i = 0; i < particleCount; i++) {
-        vertices.push(
-            position.x + (Math.random() - 0.5) * 2,
-            position.y + (Math.random() - 0.5) * 2,
-            position.z + (Math.random() - 0.5) * 2
-        );
-    }
-    
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    
-    const material = new THREE.PointsMaterial({
-        color: 0xff8844,
-        size: 0.5,
-        transparent: true
-    });
-    
-    const particles = new THREE.Points(geometry, material);
-    scene.add(particles);
-    
-    // Animate and remove explosion
-    const startTime = Date.now();
-    function animateExplosion() {
-        const elapsedTime = Date.now() - startTime;
-        if (elapsedTime > 1000) {
-            scene.remove(particles);
-            return;
-        }
-        
-        material.opacity = 1 - (elapsedTime / 1000);
-        const positions = particles.geometry.attributes.position.array;
-        
-        for (let i = 0; i < positions.length; i += 3) {
-            positions[i] += (Math.random() - 0.5) * 0.2;
-            positions[i + 1] += (Math.random() - 0.5) * 0.2;
-            positions[i + 2] += (Math.random() - 0.5) * 0.2;
-        }
-        
-        particles.geometry.attributes.position.needsUpdate = true;
-        requestAnimationFrame(animateExplosion);
-    }
-    
-    animateExplosion();
-}
-
 export function animate() {
     requestAnimationFrame(animate);
     const time = clock.getElapsedTime();
@@ -574,6 +547,23 @@ export function animate() {
     controls.target.copy(airplane.position);
     controls.update();
 
+    // Animate rain particles
+    if (rain && rain.geometry && rain.geometry.attributes.position) {
+        const rainPos = rain.geometry.attributes.position.array;
+        for (let i = 0; i < rainCount; i++) {
+            rainPos[i * 3 + 1] -= 1;
+            if (rainPos[i * 3 + 1] < 0) {
+                rainPos[i * 3 + 1] = 100;
+            }
+        }
+        rain.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // Animate neon billboard opacity pulse
+    if (billboard && billboard.material) {
+        billboard.material.opacity = 0.7 + 0.3 * Math.sin(clock.getElapsedTime() * 4);
+    }
+
     // Pulsing holograms
     holograms.forEach(holo => {
         if (holo.material) {
@@ -585,29 +575,76 @@ export function animate() {
     composer.render();
 }
 
+function calculateLift(velocity, angle) {
+    const airSpeed = velocity.length();
+    const liftForce = 0.5 * airDensity * airSpeed * airSpeed * wingArea * liftCoefficient;
+    const liftDirection = new THREE.Vector3(0, 1, 0);
+    liftDirection.applyAxisAngle(new THREE.Vector3(1, 0, 0), angle);
+    return liftDirection.multiplyScalar(liftForce);
+}
+
+function calculateDrag(velocity) {
+    const airSpeed = velocity.length();
+    const dragForce = 0.5 * airDensity * airSpeed * airSpeed * wingArea * dragCoefficient;
+    return velocity.clone().normalize().multiplyScalar(-dragForce);
+}
+
 function handleAirplaneMovement() {
     airplane.velocity = airplane.velocity || new THREE.Vector3();
+    airplane.acceleration = airplane.acceleration || new THREE.Vector3();
+
     const delta = targetPosition.clone().sub(airplane.position);
-    const smoothFactor = 0.88; // Increased smoothing for more fluid movement
-    const responsiveness = 0.12; // Increased responsiveness
+    const responsiveness = 0.05;  // Reduced for more inertia
+    const drag = 0.98;  // Increased for smoother gliding
 
-    airplane.velocity.x = airplane.velocity.x * smoothFactor + delta.x * responsiveness;
-    airplane.velocity.y = airplane.velocity.y * smoothFactor + delta.y * responsiveness;
-    
-    // Add more dynamic forward momentum based on height
-    const baseSpeed = -0.3;
-    const heightMultiplier = Math.max(0.8, Math.min(1.5, airplane.position.y / 20));
-    airplane.velocity.z = baseSpeed * heightMultiplier;
+    // Calculate angle of attack (simplified)
+    const angleOfAttack = Math.atan2(airplane.velocity.y, 
+        Math.sqrt(airplane.velocity.x * airplane.velocity.x + airplane.velocity.z * airplane.velocity.z));
 
-    // Add slight wobble
+    // Calculate aerodynamic forces
+    const lift = calculateLift(airplane.velocity, angleOfAttack);
+    const dragForce = calculateDrag(airplane.velocity);
+
+    // Apply forces to acceleration
+    airplane.acceleration.copy(gravity);
+    airplane.acceleration.add(lift.multiplyScalar(0.01));  // Scale lift for better control
+    airplane.acceleration.add(dragForce.multiplyScalar(0.01));  // Scale drag for better control
+
+    // Add player input to acceleration
+    airplane.acceleration.x += delta.x * responsiveness;
+    airplane.acceleration.y += delta.y * responsiveness;
+
+    // Apply wind effects
+    airplane.acceleration.add(wind.multiplyScalar(0.02));
+
+    // Update velocity with new acceleration
+    airplane.velocity.x = airplane.velocity.x * drag + airplane.acceleration.x;
+    airplane.velocity.y = airplane.velocity.y * drag + airplane.acceleration.y;
+    airplane.velocity.z = (-0.2 - Math.abs(angleOfAttack) * 0.3) * 
+        THREE.MathUtils.clamp(airplane.position.y / 20, 0.8, 1.5);
+
+    // Apply velocity to position
     airplane.position.add(airplane.velocity);
-    airplane.rotation.z = -airplane.velocity.x * 0.4;
-    airplane.rotation.x = airplane.velocity.y * 0.4;
+
+    // Enhanced rotation calculations
+    const bankAngle = -airplane.velocity.x * 0.6;  // Increased banking effect
+    const pitchAngle = airplane.velocity.y * 0.4;  // Increased pitch sensitivity
     
-    // Add gentle rocking motion
+    // Smooth rotation transitions
+    airplane.rotation.z = THREE.MathUtils.lerp(airplane.rotation.z, bankAngle, 0.1);
+    airplane.rotation.x = THREE.MathUtils.lerp(airplane.rotation.x, pitchAngle, 0.1);
+    airplane.rotation.y = Math.atan2(-airplane.velocity.x, -airplane.velocity.z) * 0.5;
+
+    // Add subtle turbulence
     const time = Date.now() * 0.001;
-    airplane.rotation.z += Math.sin(time * 2) * 0.01;
-    airplane.rotation.x += Math.cos(time * 1.5) * 0.01;
+    airplane.rotation.z += Math.sin(time * 1.5) * 0.005;
+    airplane.rotation.x += Math.cos(time * 1.2) * 0.005;
+    
+    // Prevent going below ground
+    if (airplane.position.y < 1) {
+        airplane.position.y = 1;
+        airplane.velocity.y = Math.abs(airplane.velocity.y) * 0.5;  // Bounce effect
+    }
 }
 
 function handleNonPlayModeMovement(time) {
@@ -714,5 +751,4 @@ export const paperAirplaneFlight = {
     init,
     animate,
     onWindowResize,
-    setPlayMode
 };
