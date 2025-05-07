@@ -11,8 +11,6 @@ let clock = new THREE.Clock();
 let wind = new THREE.Vector3();
 let holograms = [];
 let starField;
-let isPlaying = false;
-let targetPosition = new THREE.Vector3();
 let vehicles = [];
 let roads = [];
 let trail;
@@ -20,8 +18,6 @@ let trail;
 let gravity = new THREE.Vector3(0, -0.05, 0);
 let airDensity = 0.1;
 let wingArea = 2.0;
-let liftCoefficient = 1.2;
-let dragCoefficient = 0.1;
 
 export function init() {
     scene = new THREE.Scene();
@@ -61,19 +57,7 @@ export function init() {
     scene.add(billboard);
 
     // Rain particle system
-    const rainCount = 1000;
-    const rainGeometry = new THREE.BufferGeometry();
-    const rainPositions = new Float32Array(rainCount * 3);
-    for (let i = 0; i < rainCount; i++) {
-        rainPositions[i * 3] = Math.random() * 200 - 100;
-        rainPositions[i * 3 + 1] = Math.random() * 100;
-        rainPositions[i * 3 + 2] = Math.random() * 200 - 100;
-    }
-    rainGeometry.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
-
-    const rainMaterial = new THREE.PointsMaterial({ color: 0xaaaaee, size: 0.1, transparent: true, opacity: 0.6 });
-    const rain = new THREE.Points(rainGeometry, rainMaterial);
-    scene.add(rain);
+    createRainSystem();
 
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -183,30 +167,136 @@ export function init() {
 function createStarfield() {
     const starGeometry = new THREE.BufferGeometry();
     const starVertices = [];
-    for (let i = 0; i < 5000; i++) {
+    const starSizes = [];
+    const starColors = [];
+    const starPulses = [];
+
+    for (let i = 0; i < 8000; i++) {
         const x = (Math.random() - 0.5) * 2000;
         const y = (Math.random() - 0.5) * 2000;
         const z = (Math.random() - 0.5) * 2000;
         starVertices.push(x, y, z);
+        
+        // Enhanced star sizes with more variation
+        starSizes.push(Math.random() * 3 + 0.2);
+        
+        // More varied star colors including blue and purple hues
+        const colorType = Math.random();
+        const color = new THREE.Color();
+        if (colorType < 0.3) {
+            color.setHSL(0.6 + Math.random() * 0.1, 0.9, 0.8); // Blue stars
+        } else if (colorType < 0.6) {
+            color.setHSL(0.75 + Math.random() * 0.1, 0.9, 0.8); // Purple stars
+        } else {
+            color.setHSL(Math.random() * 0.2 + 0.5, 0.8, 0.9); // White/yellow stars
+        }
+        starColors.push(color.r, color.g, color.b);
+        
+        // Individual pulse rates for each star
+        starPulses.push(Math.random() * Math.PI * 2);
     }
+
     starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
-    const starMaterial = new THREE.PointsMaterial({
-        color: 0xFFFFFF,
-        size: 0.5,
-        transparent: true
+    starGeometry.setAttribute('size', new THREE.Float32BufferAttribute(starSizes, 1));
+    starGeometry.setAttribute('color', new THREE.Float32BufferAttribute(starColors, 3));
+    starGeometry.setAttribute('pulse', new THREE.Float32BufferAttribute(starPulses, 1));
+
+    const starMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+            time: { value: 0 }
+        },
+        vertexShader: `
+            attribute float size;
+            attribute vec3 color;
+            attribute float pulse;
+            varying vec3 vColor;
+            uniform float time;
+            void main() {
+                vColor = color;
+                vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                float pulseFactor = sin(time * 2.0 + pulse) * 0.3 + 0.7;
+                gl_PointSize = size * (300.0 / -mvPosition.z) * pulseFactor;
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vColor;
+            void main() {
+                float dist = length(gl_PointCoord - vec2(0.5));
+                if (dist > 0.5) discard;
+                float intensity = pow(1.0 - dist * 2.0, 2.0);
+                gl_FragColor = vec4(vColor, intensity);
+            }
+        `,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
     });
+
     starField = new THREE.Points(starGeometry, starMaterial);
     scene.add(starField);
+}
+
+function createRainSystem() {
+    rainCount = 5000;
+    const rainGeometry = new THREE.BufferGeometry();
+    const rainPositions = new Float32Array(rainCount * 3);
+    const rainVelocities = new Float32Array(rainCount * 3);
+    const rainSizes = new Float32Array(rainCount);
+
+    for (let i = 0; i < rainCount; i++) {
+        rainPositions[i * 3] = Math.random() * 400 - 200;
+        rainPositions[i * 3 + 1] = Math.random() * 200;
+        rainPositions[i * 3 + 2] = Math.random() * 400 - 200;
+        
+        rainVelocities[i * 3] = (Math.random() - 0.5) * 0.2;
+        rainVelocities[i * 3 + 1] = -3 - Math.random() * 2;
+        rainVelocities[i * 3 + 2] = (Math.random() - 0.5) * 0.2;
+        
+        rainSizes[i] = Math.random() * 0.2 + 0.1;
+    }
+
+    rainGeometry.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+    rainGeometry.setAttribute('velocity', new THREE.BufferAttribute(rainVelocities, 3));
+    rainGeometry.setAttribute('size', new THREE.BufferAttribute(rainSizes, 1));
+
+    const rainMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+            time: { value: 0 }
+        },
+        vertexShader: `
+            attribute vec3 velocity;
+            attribute float size;
+            varying float vAlpha;
+            uniform float time;
+            void main() {
+                vec3 pos = position + velocity * time;
+                pos.y = mod(pos.y, 200.0);
+                vAlpha = 0.6 + sin(time * 10.0 + position.x) * 0.4;
+                vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                gl_PointSize = size * (300.0 / -mvPosition.z);
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `,
+        fragmentShader: `
+            varying float vAlpha;
+            void main() {
+                float dist = length(gl_PointCoord - vec2(0.5));
+                if (dist > 0.5) discard;
+                gl_FragColor = vec4(0.7, 0.8, 1.0, vAlpha * (1.0 - dist * 2.0));
+            }
+        `,
+        transparent: true,
+        blending: THREE.AdditiveBlending
+    });
+
+    rain = new THREE.Points(rainGeometry, rainMaterial);
+    scene.add(rain);
 }
 
 function createNeonGrid() {
     const gridSize = 100;
     const gridDivisions = 50;
-    const gridMaterial = new THREE.LineBasicMaterial({ 
-        color: 0x00ff88,
-        transparent: true,
-        opacity: 0.3
-    });
     const grid = new THREE.GridHelper(gridSize, gridDivisions, 0x00ff88, 0x00ff88);
     grid.position.y = -5;
     scene.add(grid);
@@ -239,16 +329,8 @@ function createHolograms() {
     }
 }
 
-function updateHolograms(time) {
-    holograms.forEach((hologram, index) => {
-        hologram.material.opacity = 0.3 + Math.sin(time * 2 + index) * 0.2;
-        hologram.rotation.y += 0.005;
-        hologram.material.emissiveIntensity = 1 + Math.sin(time * 3 + index) *  0.5;
-    });
-}
-
 function createCityscape() {
-    const buildingCount = 30;
+    const buildingCount = 20;
     const buildingTypes = [
         {
             colors: [0x000088, 0x000066, 0x000044],
@@ -409,14 +491,6 @@ function createRoadNetwork() {
         road.receiveShadow = true;
         roads.push(road);
         scene.add(road);
-
-        const crossRoad = new THREE.Mesh(roadGeometry, roadMaterial);
-        crossRoad.rotation.x = -Math.PI / 2;
-        crossRoad.rotation.y = Math.PI / 2;
-        crossRoad.position.set(0, -4.9, i * 20);
-        crossRoad.receiveShadow = true;
-        roads.push(crossRoad);
-        scene.add(crossRoad);
     }
 
     // Add street lights
@@ -492,21 +566,6 @@ function initializeVehicles() {
     billboard.position.set(0, 20, -20);
     scene.add(billboard);
 
-    // Rain particle system
-    const rainCount = 1000;
-    const rainGeometry = new THREE.BufferGeometry();
-    const rainPositions = new Float32Array(rainCount * 3);
-    for (let i = 0; i < rainCount; i++) {
-        rainPositions[i * 3] = Math.random() * 200 - 100;
-        rainPositions[i * 3 + 1] = Math.random() * 100;
-        rainPositions[i * 3 + 2] = Math.random() * 200 - 100;
-    }
-    rainGeometry.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
-
-    const rainMaterial = new THREE.PointsMaterial({ color: 0xaaaaee, size: 0.1, transparent: true, opacity: 0.6 });
-    const rain = new THREE.Points(rainGeometry, rainMaterial);
-    scene.add(rain);
-
     }
 }
 
@@ -529,34 +588,187 @@ function updateVehicles() {
     });
 }
 
+function checkCollision() {
+    const airplaneBox = new THREE.Box3().setFromObject(airplane);
+    
+    // Check collision with buildings
+    for (const building of buildings) {
+        const buildingBox = new THREE.Box3().setFromObject(building);
+        if (airplaneBox.intersectsBox(buildingBox)) {
+            return true;
+        }
+    }
+
+    // Check if airplane is too low
+    if (airplane.position.y < 0.5) {
+        return true;
+    }
+
+    return false;
+}
+
+function calculateAerodynamicForces(velocity, windSpeed, angle) {
+    // Calculate relative airspeed
+    const relativeAirspeed = new THREE.Vector3().subVectors(velocity, windSpeed);
+    const airspeedMagnitude = relativeAirspeed.length();
+
+    // Calculate angle of attack (simplified)
+    const angleOfAttack = angle + Math.atan2(relativeAirspeed.y, Math.sqrt(relativeAirspeed.x * relativeAirspeed.x + relativeAirspeed.z * relativeAirspeed.z));
+    
+    // Calculate lift coefficient based on angle of attack
+    const stallAngle = 0.3; // About 17 degrees
+    let liftCoefficient = 1.2 * Math.sin(2 * angleOfAttack);
+    if (Math.abs(angleOfAttack) > stallAngle) {
+        liftCoefficient *= 0.6; // Reduce lift when stalling
+    }
+
+    // Calculate drag coefficient (includes induced drag)
+    const parasiteDrag = 0.1;
+    const inducedDragFactor = 0.05;
+    const dragCoefficient = parasiteDrag + inducedDragFactor * liftCoefficient * liftCoefficient;
+
+    // Calculate lift and drag forces
+    const dynamicPressure = 0.5 * airDensity * airspeedMagnitude * airspeedMagnitude;
+    const liftForce = dynamicPressure * wingArea * liftCoefficient;
+    const dragForce = dynamicPressure * wingArea * dragCoefficient;
+
+    // Calculate lift and drag vectors
+    const liftDirection = new THREE.Vector3(0, 1, 0);
+    const dragDirection = relativeAirspeed.clone().normalize().negate();
+
+    return {
+        lift: liftDirection.multiplyScalar(liftForce),
+        drag: dragDirection.multiplyScalar(dragForce)
+    };
+}
+
+function handleNonPlayModeMovement(time) {
+    // Dynamic wind influence with more variation
+    const windStrength = 0.8 * (1 + Math.sin(time * 0.1));
+    wind.x = Math.sin(time * 0.1) * windStrength + Math.sin(time * 0.3) * 0.2;
+    wind.y = Math.cos(time * 0.07) * windStrength * 0.3;
+    wind.z = Math.cos(time * 0.05) * windStrength + Math.cos(time * 0.4) * 0.2;
+
+    // Enhanced flight path parameters with lower minimum height
+    const baseHeight = 20; // Reduced from 35
+    const swoopDepth = 15;
+    const swoopSpeed = 0.2;
+
+    // Calculate aerodynamic forces
+    const forces = calculateAerodynamicForces(
+        airplane.velocity,
+        wind,
+        airplane.rotation.x
+    );
+
+    // Calculate base flight path
+    const pathX = Math.sin(time * 0.3) * 20 + Math.cos(time * 0.8) * 10;
+    const swoopY = Math.sin(time * swoopSpeed) * swoopDepth;
+    const baseY = baseHeight + swoopY + Math.sin(time * 0.5) * 5;
+    const pathZ = Math.sin(time * 0.4) * 15;
+
+    // Enhanced building avoidance and interaction
+    let ax = 0, ay = 0, az = 0;
+    const minSafeDistance = 10; // Reduced from 15
+    const attractionDistance = 50;
+    const maxAvoidanceForce = 5;
+    const maxAttractionForce = 2;
+
+    // Calculate distance-based safe radius for each building
+    buildings.forEach(building => {
+        const dx = building.position.x - airplane.position.x;
+        const dy = building.position.y - airplane.position.y;
+        const dz = building.position.z - airplane.position.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        
+        const buildingHeight = building.geometry.parameters.height;
+        const safeRadius = minSafeDistance + (buildingHeight / 20); // Reduced safety margin
+        
+        if (dist < safeRadius) {
+            const force = Math.min(maxAvoidanceForce, (safeRadius - dist) / safeRadius);
+            
+            ax -= (dx / dist) * force * 2.5;
+            ay += Math.abs(force) * 3 * (airplane.position.y < building.position.y + buildingHeight + 3 ? 2 : 1);
+            az -= (dz / dist) * force * 2.5;
+            
+            if (airplane.position.y < building.position.y + buildingHeight + 5) {
+                ay += force * 4;
+            }
+        } else if (dist < attractionDistance && airplane.position.y > building.position.y + buildingHeight + 8) {
+            const attractionForce = Math.min(maxAttractionForce, 
+                (dist - safeRadius) / (attractionDistance - safeRadius));
+            ax += (dx / dist) * attractionForce * 0.4;
+            ay -= attractionForce * 0.5;
+            az += (dz / dist) * attractionForce * 0.4;
+        }
+    });
+
+    // Apply aerodynamic forces
+    ax += forces.lift.x + forces.drag.x;
+    ay += forces.lift.y + forces.drag.y;
+    az += forces.lift.z + forces.drag.z;
+
+    // Apply gravity with ground effect
+    const groundEffectHeight = 5;
+    const groundEffect = Math.max(0, 1 - (airplane.position.y / groundEffectHeight));
+    ay += gravity.y * (1 - groundEffect * 0.7);
+
+    // Calculate final target position with all influences
+    const targetPos = new THREE.Vector3(
+        pathX + ax + wind.x,
+        baseY + ay + wind.y,
+        pathZ + az + wind.z
+    );
+
+    // Enhanced movement smoothing with ground proximity consideration
+    const proximityToGround = Math.max(0, Math.min(1, airplane.position.y / 10));
+    const speedFactor = Math.min(1, airplane.velocity.length() / 2);
+    const smoothingFactor = (0.03 + (1 - speedFactor) * 0.05) * (0.7 + proximityToGround * 0.3);
+    
+    airplane.velocity.lerp(targetPos.sub(airplane.position), smoothingFactor);
+    
+    // Dynamic speed control based on altitude
+    const maxSpeed = 2.0 + proximityToGround;
+    if (airplane.velocity.length() > maxSpeed) {
+        airplane.velocity.normalize().multiplyScalar(maxSpeed);
+    }
+    
+    airplane.position.add(airplane.velocity.multiplyScalar(0.15));
+
+    // Enhanced rotation handling with ground effect
+    const bankingSensitivity = 0.3 * (0.7 + proximityToGround * 0.3);
+    const pitchSensitivity = 0.2 * (0.7 + proximityToGround * 0.3);
+    airplane.rotation.z = -airplane.velocity.x * bankingSensitivity;
+    airplane.rotation.x = airplane.velocity.y * pitchSensitivity;
+    
+    const targetYaw = Math.atan2(-airplane.velocity.x, -airplane.velocity.z);
+    airplane.rotation.y += Math.sin(targetYaw - airplane.rotation.y) * 0.1;
+
+    const turnIntensity = Math.abs(airplane.velocity.x) / 5;
+    airplane.rotation.z -= Math.sign(airplane.velocity.x) * turnIntensity;
+
+    // Adaptive camera follow with ground proximity awareness
+    const cameraHeightFactor = Math.max(0.3, Math.min(1, (airplane.position.y - 5) / 20));
+    const cameraOffset = new THREE.Vector3(
+        Math.sin(time * 0.2) * 2,
+        3 + cameraHeightFactor * 6,
+        8 + cameraHeightFactor * 4
+    );
+    const desiredCameraPos = airplane.position.clone().add(cameraOffset);
+    camera.position.lerp(desiredCameraPos, 0.05);
+    camera.lookAt(airplane.position);
+}
+
 export function animate() {
     requestAnimationFrame(animate);
     const time = clock.getElapsedTime();
 
-    if (isPlaying) {
-        // Handle airplane movement and collision detection
-        handleAirplaneMovement();
-        if (checkCollision()) {
-            resetGame();
-        }
-        updateCamera();
-    } else {
-        handleNonPlayModeMovement(time);
-    }
-
-    controls.target.copy(airplane.position);
-    controls.update();
+    checkCollision();
+    handleNonPlayModeMovement(time);
 
     // Animate rain particles
-    if (rain && rain.geometry && rain.geometry.attributes.position) {
-        const rainPos = rain.geometry.attributes.position.array;
-        for (let i = 0; i < rainCount; i++) {
-            rainPos[i * 3 + 1] -= 1;
-            if (rainPos[i * 3 + 1] < 0) {
-                rainPos[i * 3 + 1] = 100;
-            }
-        }
-        rain.geometry.attributes.position.needsUpdate = true;
+    if (rain && rain.material.uniforms) {
+        rain.material.uniforms.time.value = time;
     }
 
     // Animate neon billboard opacity pulse
@@ -571,169 +783,12 @@ export function animate() {
         }
     });
 
+    if (starField && starField.material.uniforms) {
+        starField.material.uniforms.time.value = time;
+    }
+
     updateVehicles();
     composer.render();
-}
-
-function calculateLift(velocity, angle) {
-    const airSpeed = velocity.length();
-    const liftForce = 0.5 * airDensity * airSpeed * airSpeed * wingArea * liftCoefficient;
-    const liftDirection = new THREE.Vector3(0, 1, 0);
-    liftDirection.applyAxisAngle(new THREE.Vector3(1, 0, 0), angle);
-    return liftDirection.multiplyScalar(liftForce);
-}
-
-function calculateDrag(velocity) {
-    const airSpeed = velocity.length();
-    const dragForce = 0.5 * airDensity * airSpeed * airSpeed * wingArea * dragCoefficient;
-    return velocity.clone().normalize().multiplyScalar(-dragForce);
-}
-
-function handleAirplaneMovement() {
-    airplane.velocity = airplane.velocity || new THREE.Vector3();
-    airplane.acceleration = airplane.acceleration || new THREE.Vector3();
-
-    const delta = targetPosition.clone().sub(airplane.position);
-    const responsiveness = 0.05;  // Reduced for more inertia
-    const drag = 0.98;  // Increased for smoother gliding
-
-    // Calculate angle of attack (simplified)
-    const angleOfAttack = Math.atan2(airplane.velocity.y, 
-        Math.sqrt(airplane.velocity.x * airplane.velocity.x + airplane.velocity.z * airplane.velocity.z));
-
-    // Calculate aerodynamic forces
-    const lift = calculateLift(airplane.velocity, angleOfAttack);
-    const dragForce = calculateDrag(airplane.velocity);
-
-    // Apply forces to acceleration
-    airplane.acceleration.copy(gravity);
-    airplane.acceleration.add(lift.multiplyScalar(0.01));  // Scale lift for better control
-    airplane.acceleration.add(dragForce.multiplyScalar(0.01));  // Scale drag for better control
-
-    // Add player input to acceleration
-    airplane.acceleration.x += delta.x * responsiveness;
-    airplane.acceleration.y += delta.y * responsiveness;
-
-    // Apply wind effects
-    airplane.acceleration.add(wind.multiplyScalar(0.02));
-
-    // Update velocity with new acceleration
-    airplane.velocity.x = airplane.velocity.x * drag + airplane.acceleration.x;
-    airplane.velocity.y = airplane.velocity.y * drag + airplane.acceleration.y;
-    airplane.velocity.z = (-0.2 - Math.abs(angleOfAttack) * 0.3) * 
-        THREE.MathUtils.clamp(airplane.position.y / 20, 0.8, 1.5);
-
-    // Apply velocity to position
-    airplane.position.add(airplane.velocity);
-
-    // Enhanced rotation calculations
-    const bankAngle = -airplane.velocity.x * 0.6;  // Increased banking effect
-    const pitchAngle = airplane.velocity.y * 0.4;  // Increased pitch sensitivity
-    
-    // Smooth rotation transitions
-    airplane.rotation.z = THREE.MathUtils.lerp(airplane.rotation.z, bankAngle, 0.1);
-    airplane.rotation.x = THREE.MathUtils.lerp(airplane.rotation.x, pitchAngle, 0.1);
-    airplane.rotation.y = Math.atan2(-airplane.velocity.x, -airplane.velocity.z) * 0.5;
-
-    // Add subtle turbulence
-    const time = Date.now() * 0.001;
-    airplane.rotation.z += Math.sin(time * 1.5) * 0.005;
-    airplane.rotation.x += Math.cos(time * 1.2) * 0.005;
-    
-    // Prevent going below ground
-    if (airplane.position.y < 1) {
-        airplane.position.y = 1;
-        airplane.velocity.y = Math.abs(airplane.velocity.y) * 0.5;  // Bounce effect
-    }
-}
-
-function handleNonPlayModeMovement(time) {
-    const windStrength = 0.5;
-    wind.x = Math.sin(time * 0.1) * windStrength;
-    wind.y = Math.cos(time * 0.07) * windStrength * 0.2;
-    wind.z = Math.cos(time * 0.05) * windStrength;
-
-    // Create more dynamic swooping motion
-    const baseHeight = 35;
-    const swoopDepth = 25;
-    const swoopSpeed = 0.15;
-    
-    // Complex movement pattern combining multiple sine waves
-    const nextX = Math.sin(time * 0.3) * 20 + Math.cos(time * 0.8) * 10;
-    const swoopY = Math.sin(time * swoopSpeed) * swoopDepth;
-    const nextY = baseHeight + swoopY + Math.sin(time * 0.5) * 5;
-    const nextZ = Math.sin(time * 0.4) * 15;
-
-    // Enhanced building avoidance and interaction
-    let ax = 0, ay = 0, az = 0;
-    const safeDistance = 10;
-    const attractionDistance = 30;
-    buildings.forEach(building => {
-        const dx = building.position.x - airplane.position.x;
-        const dy = building.position.y - airplane.position.y;
-        const dz = building.position.z - airplane.position.z;
-        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        
-        if (dist < safeDistance) {
-            // Strong avoidance when too close
-            const force = (safeDistance - dist) / safeDistance;
-            ax -= (dx / dist) * force * 3;
-            ay += Math.abs(force) * 4;
-            az -= (dz / dist) * force * 3;
-        } else if (dist < attractionDistance && airplane.position.y > building.position.y + 10) {
-            // Gentle attraction to buildings when above them
-            const attractionForce = (dist - safeDistance) / (attractionDistance - safeDistance);
-            ax += (dx / dist) * attractionForce * 0.5;
-            ay -= attractionForce * 0.8;
-            az += (dz / dist) * attractionForce * 0.5;
-        }
-    });
-
-    const targetPos = new THREE.Vector3(
-        nextX + ax + wind.x,
-        nextY + ay + wind.y,
-        nextZ + az + wind.z
-    );
-
-    // Smoother acceleration and movement
-    airplane.velocity.lerp(targetPos.sub(airplane.position), 0.03);
-    airplane.position.add(airplane.velocity.multiplyScalar(0.15));
-
-    // Enhanced rotation for more fluid banking and pitching
-    airplane.rotation.z = -airplane.velocity.x * 0.3;
-    airplane.rotation.x = airplane.velocity.y * 0.2;
-    airplane.rotation.y = Math.atan2(-airplane.velocity.x, -airplane.velocity.z);
-
-    // Add banking effect during turns
-    const turnIntensity = Math.abs(airplane.velocity.x) / 5;
-    airplane.rotation.z -= Math.sign(airplane.velocity.x) * turnIntensity;
-
-    // Dynamic camera follow
-    const heightFactor = Math.max(0, Math.min(1, (airplane.position.y - 10) / 30));
-    const cameraOffset = new THREE.Vector3(
-        Math.sin(time * 0.2) * 2,
-        4 + heightFactor * 8,
-        12 + heightFactor * 4
-    );
-    const desiredCameraPos = airplane.position.clone().add(cameraOffset);
-    camera.position.lerp(desiredCameraPos, 0.05);
-    camera.lookAt(airplane.position);
-}
-
-function updateCamera() {
-    const idealOffset = new THREE.Vector3(0, 40, 30); // Higher Y and further Z offset
-    const idealLookat = new THREE.Vector3(0, 0, -20); // Looking further ahead
-    
-    const offset = idealOffset.clone();
-    offset.applyQuaternion(airplane.quaternion);
-    offset.add(airplane.position);
-    
-    const lookat = idealLookat.clone();
-    lookat.applyQuaternion(airplane.quaternion);
-    lookat.add(airplane.position);
-    
-    camera.position.lerp(offset, 0.1);
-    camera.lookAt(lookat);
 }
 
 export function onWindowResize() {
