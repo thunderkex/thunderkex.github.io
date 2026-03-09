@@ -539,14 +539,33 @@ async function loadConfig() {
   $('app-area').style.display = 'none';
   $('apply-bar').style.display = 'none';
 
-  const url = `https://api.github.com/repos/${REPO}/contents/config.toml?ref=${BRANCH}`;
-  const headers = { Accept: 'application/vnd.github.v3.raw' };
-  if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
+  async function fetchConfigText() {
+    if (!TOKEN) {
+      const rawUrl = `https://raw.githubusercontent.com/${REPO}/${encodeURIComponent(BRANCH)}/config.toml`;
+      const r = await fetch(rawUrl);
+      if (r.ok) return r.text();
+      if (r.status === 404) throw new Error('config.toml not found (check repo / branch)');
+    }
+    const apiUrl = `https://api.github.com/repos/${REPO}/contents/config.toml?ref=${encodeURIComponent(BRANCH)}`;
+    const headers = { Accept: 'application/vnd.github.v3.raw', 'X-GitHub-Api-Version': '2022-11-28' };
+    if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
+    const r = await fetch(apiUrl, { headers });
+    const rem = r.headers.get('X-RateLimit-Remaining');
+    const rst = r.headers.get('X-RateLimit-Reset');
+    if (rem !== null) _rlRemaining = parseInt(rem, 10);
+    if (rst !== null) _rlReset = parseInt(rst, 10);
+    if (!r.ok) {
+      if ((r.status === 403 || r.status === 429) && _rlRemaining === 0) {
+        const secs = _rlReset ? Math.ceil((_rlReset * 1000 - Date.now()) / 1000) : '?';
+        throw new Error(`Rate limit exceeded — resets in ${secs}s. Add a GitHub token to increase limits.`);
+      }
+      throw new Error(`HTTP ${r.status} – ${r.statusText}`);
+    }
+    return r.text();
+  }
 
   try {
-    const resp = await fetch(url, { headers });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status} – ${resp.statusText}`);
-    const text = await resp.text();
+    const text = await fetchConfigText();
     const parsed = parseToml(text);
     APPS = parsed.apps;
     PACK_NAME_CONFIG = parsed.packName;
@@ -1037,41 +1056,55 @@ function showBuildPanel(state, run, assets) {
   else { const s = $('bp-steps'); if (s) s.style.display = 'none'; }
 }
 
+const _stepsCache = {};
+
 async function fetchAndShowSteps(runId) {
+  const now = Date.now();
+  const cached = _stepsCache[runId];
+  if (cached && (cached.completed || now - cached.fetchedAt < 30000)) {
+    _renderStepsData(cached.data);
+    return;
+  }
   try {
     const data = await apiGet(`https://api.github.com/repos/${REPO}/actions/runs/${runId}/jobs?per_page=10`);
-    const jobs = (data.jobs || []).filter(j => j.status !== 'queued' || (j.steps && j.steps.length > 0));
-    if (!jobs.length) return;
-    const iconOf = s => {
-      if (s.status === 'in_progress') return '<i class="bp-step-icon" style="color:var(--blue)">▶</i>';
-      if (s.conclusion === 'success')  return '<i class="bp-step-icon" style="color:var(--green)">✓</i>';
-      if (s.conclusion === 'failure')  return '<i class="bp-step-icon" style="color:var(--red)">✗</i>';
-      if (s.conclusion === 'skipped')  return '<i class="bp-step-icon" style="color:var(--text2)">—</i>';
-      return '<i class="bp-step-icon">○</i>';
-    };
-    const classOf = s => {
-      if (s.status === 'in_progress') return 'step-active';
-      if (s.conclusion === 'failure') return 'step-fail';
-      return '';
-    };
-    let html = '';
-    for (const job of jobs) {
-      const jIcon = job.status === 'in_progress' ? '🔄'
-        : job.conclusion === 'success' ? '✅'
-        : job.conclusion === 'failure' ? '❌'
-        : '⏳';
-      html += `<div class="bp-job-name">${jIcon} ${job.name}</div>`;
-      for (const step of (job.steps || [])) {
-        const dur = step.completed_at && step.started_at
-          ? `${Math.round((new Date(step.completed_at) - new Date(step.started_at)) / 1000)}s` : '';
-        html += `<div class="bp-step ${classOf(step)}">${iconOf(step)}<span class="bp-step-name">${step.name}</span>${dur ? `<span class="bp-step-dur">${dur}</span>` : ''}</div>`;
-      }
-    }
-    const body = $('bp-steps-body');
-    const section = $('bp-steps');
-    if (body) body.innerHTML = html;
-    if (section) section.style.display = '';
+    const allDone = (data.jobs || []).length > 0 && (data.jobs || []).every(j => j.status === 'completed');
+    _stepsCache[runId] = { data, fetchedAt: now, completed: allDone };
+    _renderStepsData(data);
   } catch (_) {}
+}
+
+function _renderStepsData(data) {
+  const jobs = (data.jobs || []).filter(j => j.status !== 'queued' || (j.steps && j.steps.length > 0));
+  if (!jobs.length) return;
+  const iconOf = s => {
+    if (s.status === 'in_progress') return '<i class="bp-step-icon" style="color:var(--blue)">▶</i>';
+    if (s.conclusion === 'success')  return '<i class="bp-step-icon" style="color:var(--green)">✓</i>';
+    if (s.conclusion === 'failure')  return '<i class="bp-step-icon" style="color:var(--red)">✗</i>';
+    if (s.conclusion === 'skipped')  return '<i class="bp-step-icon" style="color:var(--text2)">—</i>';
+    return '<i class="bp-step-icon">○</i>';
+  };
+  const classOf = s => {
+    if (s.status === 'in_progress') return 'step-active';
+    if (s.conclusion === 'failure') return 'step-fail';
+    return '';
+  };
+  let html = '';
+  for (const job of jobs) {
+    const jIcon = job.status === 'in_progress' ? '🔄'
+      : job.conclusion === 'success' ? '✅'
+      : job.conclusion === 'failure' ? '❌'
+      : '⏳';
+    html += `<div class="bp-job-name">${jIcon} ${job.name}</div>`;
+    for (const step of (job.steps || [])) {
+      const dur = step.completed_at && step.started_at
+        ? `${Math.round((new Date(step.completed_at) - new Date(step.started_at)) / 1000)}s` : '';
+      html += `<div class="bp-step ${classOf(step)}">${iconOf(step)}<span class="bp-step-name">${step.name}</span>${dur ? `<span class="bp-step-dur">${dur}</span>` : ''}</div>`;
+    }
+  }
+  const body = $('bp-steps-body');
+  const section = $('bp-steps');
+  if (body) body.innerHTML = html;
+  if (section) section.style.display = '';
 }
 
 async function toggleRunSteps(btn, runId) {
@@ -1128,11 +1161,28 @@ async function loadRecentRuns() {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+let _rlRemaining = null;
+let _rlReset = null;
+
 async function apiGet(url) {
+  if (_rlRemaining === 0 && _rlReset && Date.now() < _rlReset * 1000) {
+    const secs = Math.ceil((_rlReset * 1000 - Date.now()) / 1000);
+    throw new Error(`Rate limit exceeded — resets in ${secs}s. Add a GitHub token to increase limits.`);
+  }
   const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
   if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
   const resp = await fetch(url, { headers });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const rem = resp.headers.get('X-RateLimit-Remaining');
+  const rst = resp.headers.get('X-RateLimit-Reset');
+  if (rem !== null) _rlRemaining = parseInt(rem, 10);
+  if (rst !== null) _rlReset = parseInt(rst, 10);
+  if (!resp.ok) {
+    if ((resp.status === 403 || resp.status === 429) && _rlRemaining === 0) {
+      const secs = _rlReset ? Math.ceil((_rlReset * 1000 - Date.now()) / 1000) : '?';
+      throw new Error(`Rate limit exceeded — resets in ${secs}s. Add a GitHub token to increase limits.`);
+    }
+    throw new Error(`HTTP ${resp.status}`);
+  }
   return resp.json();
 }
 
