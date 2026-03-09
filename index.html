@@ -272,6 +272,33 @@
     0%   { transform: translateX(-100%); }
     100% { transform: translateX(500%); }
   }
+
+  /* ── Minimize button ── */
+  .bp-minimize {
+    background: none; border: none; cursor: pointer;
+    color: var(--text2); font-size: 16px; line-height: 1;
+    padding: 0 3px; margin-right: 2px;
+  }
+  .bp-minimize:hover { color: var(--text); }
+  .bp-head-btns { display: flex; gap: 2px; align-items: center; }
+
+  /* ── Actions History (in main) ── */
+  .ht-entry {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px;
+  }
+  .ht-icon { font-size: 18px; flex-shrink: 0; }
+  .ht-info { flex: 1; min-width: 0; }
+  .ht-label { font-size: 13px; font-weight: 600; }
+  .ht-sub { font-size: 11px; color: var(--text2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ht-btn {
+    background: none; border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text2);
+    font-size: 12px; padding: 4px 10px; cursor: pointer;
+    flex-shrink: 0; transition: border-color .12s, color .12s;
+  }
+  .ht-btn:hover { border-color: var(--blue); color: var(--blue); }
 </style>
 </head>
 <body>
@@ -285,7 +312,7 @@
 <div class="auth-bar">
   <input name="repo"  placeholder="owner/repo" value="thunderkex/revanced-extended" />
   <input name="branch" placeholder="branch" value="ex" style="width:80px" />
-  <input name="token" type="password" placeholder="GitHub token (for private repo access)" />
+  <input name="token" type="password" placeholder="PAT — needs 'workflow' scope (classic) or Actions:write (fine-grained)" />
   <button class="btn btn-load" onclick="loadConfig()">Load Config</button>
 </div>
 
@@ -307,6 +334,11 @@
 
     <div class="section-title" id="dev-section-title" style="display:none">Dev / Experimental</div>
     <div class="grid" id="dev-grid"></div>
+  </div>
+
+  <div id="history-section" style="display:none">
+    <div class="section-title">Actions History</div>
+    <div id="ht-body"></div>
   </div>
 </div>
 
@@ -333,7 +365,10 @@
 <div class="build-panel" id="build-panel" style="display:none">
   <div class="build-panel-head">
     <h3>Build Monitor</h3>
-    <button class="build-panel-close" onclick="closeBuildPanel()" title="Close">×</button>
+    <div class="bp-head-btns">
+      <button class="bp-minimize" onclick="minimizeBuildPanel()" title="Minimize to Actions History">─</button>
+      <button class="build-panel-close" onclick="closeBuildPanel()" title="Close">×</button>
+    </div>
   </div>
   <div class="build-panel-body">
     <div class="build-status-row">
@@ -349,12 +384,16 @@
 </div>
 
 <script>
-let APPS = [];       // parsed app sections
+let APPS = [];      
 let REPO = '';
 let BRANCH = '';
 let TOKEN = '';
 
-// ── Helpers ──
+(function() {
+  const saved = sessionStorage.getItem('revpack_token');
+  if (saved) document.querySelector('input[name="token"]').value = saved;
+})();
+
 const $ = id => document.getElementById(id);
 function showToast(msg, ms = 2800) {
   const t = $('toast'); t.textContent = msg; t.style.display = 'block';
@@ -419,7 +458,7 @@ function parseToml(text) {
     } else if (hasPackList) {
       a.inPack = packApps.includes(a.name);
     } else {
-      a.inPack = a.enabled; // default: all enabled apps are packed
+      a.inPack = a.enabled; 
     }
   }
 
@@ -429,7 +468,9 @@ function parseToml(text) {
 async function loadConfig() {
   REPO   = document.querySelector('input[name="repo"]').value.trim();
   BRANCH = document.querySelector('input[name="branch"]').value.trim() || 'ex';
-  TOKEN  = document.querySelector('input[name="token"]').value.trim();
+  const inputToken = document.querySelector('input[name="token"]').value.trim();
+  TOKEN  = inputToken || sessionStorage.getItem('revpack_token') || '';
+  if (inputToken) sessionStorage.setItem('revpack_token', inputToken);
 
   if (!REPO) { showToast('Enter a repo (owner/repo)'); return; }
 
@@ -569,11 +610,14 @@ function updateInfo() {
 }
 
 async function applyConfig() {
-  TOKEN = document.querySelector('input[name="token"]').value.trim();
+  const inputToken = document.querySelector('input[name="token"]').value.trim();
+  TOKEN = inputToken || localStorage.getItem('revpack_token') || '';
   if (!TOKEN) {
     showToast('⚠️ A GitHub token is required to trigger workflows', 4000);
     return;
   }
+  sessionStorage.setItem('revpack_token', TOKEN);
+  if (!inputToken) document.querySelector('input[name="token"]').value = TOKEN;
 
   const btn = $('apply-btn');
   btn.disabled = true;
@@ -614,24 +658,83 @@ async function applyConfig() {
     if (resp.status === 204) {
       showToast(`✅ Workflow triggered! ${triggerBuild ? 'Build starting…' : 'Config saved.'}`, 4000);
       if (triggerBuild) startBuildMonitor(Date.now());
+    } else if (resp.status === 403) {
+      throw new Error('Token lacks permission — add the "workflow" scope (classic PAT) or "Actions: Read and write" (fine-grained PAT).');
+    } else if (resp.status === 401) {
+      throw new Error('Token invalid or expired. Re-generate your PAT and try again.');
+    } else if (resp.status === 404) {
+      throw new Error(`Workflow not found. Check that "configure-apps.yml" exists on branch "${BRANCH}" and the repo name is correct.`);
     } else {
       const body = await resp.text();
       throw new Error(`HTTP ${resp.status}: ${body}`);
     }
   } catch (e) {
-    showToast(`❌ Error: ${e.message}`, 5000);
+    showToast(`❌ ${e.message}`, 7000);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Apply';
   }
 }
 
-// ── Build Monitor ──
 let _monitorTimer = null;
+let BUILD_HISTORY = [];
+let _currentHistoryId = null;
 
 function closeBuildPanel() {
   clearTimeout(_monitorTimer);
   $('build-panel').style.display = 'none';
+  _currentHistoryId = null;
+}
+
+function minimizeBuildPanel() {
+  const entry = BUILD_HISTORY.find(e => e.id === _currentHistoryId);
+  if (entry) entry.minimized = true;
+  $('build-panel').style.display = 'none';
+  updateHistoryTab();
+}
+
+function restoreBuildFromHistory(id) {
+  const entry = BUILD_HISTORY.find(e => e.id === id);
+  if (!entry) return;
+  _currentHistoryId = id;
+  entry.minimized = false;
+  showBuildPanel(entry.state, entry.run, entry.assets);
+  updateHistoryTab();
+}
+
+function generateId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function updateHistoryTab() {
+  const body = $('ht-body');
+  const section = $('history-section');
+  const entries = BUILD_HISTORY.filter(e => e.minimized);
+  section.style.display = entries.length > 0 ? '' : 'none';
+  if (entries.length === 0) {
+    body.innerHTML = '';
+    return;
+  }
+  const icons = { searching:'🔍', queued:'⏳', in_progress:'🔄', success:'✅', failure:'❌', cancelled:'⚠️', 'not-found':'❓' };
+  const labels = { searching:'Searching…', queued:'Queued', in_progress:'In progress…', success:'Succeeded', failure:'Failed', cancelled:'Cancelled', 'not-found':'Not found' };
+  body.innerHTML = '';
+  for (const e of entries) {
+    const sub = e.run
+      ? `Run #${e.run.run_number} · ${new Date(e.run.created_at).toLocaleTimeString()}`
+      : `Started ${new Date(e.triggeredAt).toLocaleTimeString()}`;
+    const div = document.createElement('div');
+    div.className = 'ht-entry';
+    div.id = 'ht-entry-' + e.id;
+    div.innerHTML = `<span class="ht-icon">${icons[e.state]||'⏳'}</span><div class="ht-info"><div class="ht-label">${labels[e.state]||e.state}</div><div class="ht-sub">${sub}</div></div><button class="ht-btn" onclick="restoreBuildFromHistory('${e.id}')">Restore</button>`;
+    body.appendChild(div);
+  }
+}
+
+function updateHistoryEntry(id, state, run, assets) {
+  const e = BUILD_HISTORY.find(e => e.id === id);
+  if (!e) return;
+  e.state = state; e.run = run; e.assets = assets;
+  if (e.minimized) updateHistoryTab();
 }
 
 function showBuildPanel(state, run, assets) {
@@ -703,6 +806,7 @@ function showBuildPanel(state, run, assets) {
     a.innerHTML = '<span class="lk-name">🔗 Open Actions page</span>';
     linksEl.appendChild(a);
   }
+  if (_currentHistoryId) updateHistoryEntry(_currentHistoryId, state, run, assets);
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -716,8 +820,10 @@ async function apiGet(url) {
 }
 
 async function startBuildMonitor(triggeredAt) {
+  const id = generateId();
+  BUILD_HISTORY.push({ id, triggeredAt, state: 'searching', run: null, assets: null, minimized: false });
+  _currentHistoryId = id;
   showBuildPanel('searching', null, null);
-  // Give configure-apps.yml ~12 s to dispatch ci.yml
   await sleep(12000);
   pollForRun(triggeredAt, 0);
 }
@@ -731,7 +837,6 @@ async function pollForRun(triggeredAt, attempts) {
     const data = await apiGet(
       `https://api.github.com/repos/${REPO}/actions/workflows/ci.yml/runs?per_page=5&branch=${encodeURIComponent(BRANCH)}`
     );
-    // Find a run created within 60 s before or after the trigger timestamp
     const run = (data.workflow_runs || []).find(
       r => new Date(r.created_at).getTime() >= triggeredAt - 60000
     );
