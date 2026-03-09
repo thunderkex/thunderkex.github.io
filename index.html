@@ -312,7 +312,7 @@
 <div class="auth-bar">
   <input name="repo"  placeholder="owner/repo" value="thunderkex/revanced-extended" />
   <input name="branch" placeholder="branch" value="ex" style="width:80px" />
-  <input name="token" type="password" placeholder="PAT — needs 'workflow' scope (classic) or Actions:write (fine-grained)" />
+  <input name="token" type="password" placeholder="Github Token" />
   <button class="btn btn-load" onclick="loadConfig()">Load Config</button>
 </div>
 
@@ -345,6 +345,9 @@
 <div class="apply-bar" id="apply-bar" style="display:none">
   <div class="info" id="apply-info"></div>
   <div class="apply-bar-right">
+    <input type="text" id="pack-name-input" placeholder="pack name" title="Custom RevPack zip filename (without .zip)"
+      style="width:130px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;padding:6px 10px;outline:none;"
+      oninput="this._userEdited=!!this.value">
     <select id="arch-select">
       <option value="arm64-v8a">arm64-v8a</option>
       <option value="armeabi-v7a">armeabi-v7a</option>
@@ -388,6 +391,7 @@ let APPS = [];
 let REPO = '';
 let BRANCH = '';
 let TOKEN = '';
+let PACK_NAME_CONFIG = 'revpack';
 
 (function() {
   const saved = sessionStorage.getItem('revpack_token');
@@ -406,6 +410,7 @@ function parseToml(text) {
 
   let packApps = [];
   let packExclude = [];
+  let packName = 'revpack';
 
   let current = null;
   let inMain = true;
@@ -434,6 +439,8 @@ function parseToml(text) {
       if (exclM) {
         packExclude = exclM[1].split(',').map(s => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
       }
+      const nameM = line.match(/^pack-name\s*=\s*"?([^"#\s]+)"?/);
+      if (nameM) { packName = nameM[1]; }
       continue;
     }
     if (!current) continue;
@@ -462,7 +469,7 @@ function parseToml(text) {
     }
   }
 
-  return apps;
+  return { apps, packName };
 }
 
 async function loadConfig() {
@@ -487,7 +494,9 @@ async function loadConfig() {
     const resp = await fetch(url, { headers });
     if (!resp.ok) throw new Error(`HTTP ${resp.status} – ${resp.statusText}`);
     const text = await resp.text();
-    APPS = parseToml(text);
+    const parsed = parseToml(text);
+    APPS = parsed.apps;
+    PACK_NAME_CONFIG = parsed.packName;
     renderApps();
   } catch (e) {
     $('status-banner').innerHTML = `❌ Failed to load config: <b>${e.message}</b><br>
@@ -499,6 +508,9 @@ function renderApps() {
   const grid    = $('app-grid');
   const devGrid = $('dev-grid');
   grid.innerHTML = ''; devGrid.innerHTML = '';
+
+  const pni = $('pack-name-input');
+  if (pni && !pni._userEdited) pni.value = PACK_NAME_CONFIG;
 
   const normal = APPS.filter(a => !a.isDev);
   const dev    = APPS.filter(a => a.isDev);
@@ -630,12 +642,14 @@ async function applyConfig() {
 
   const arch   = $('arch-select').value;
   const triggerBuild = $('trigger-build-cb').checked;
+  const packNameVal = ($('pack-name-input').value.trim()) || PACK_NAME_CONFIG;
 
   const inputs = {
     enabled_apps:       enabledApps.join(',') || 'all',
     disabled_apps:      disabledApps.join(','),
     pack_apps:          packApps.join(','),
     pack_exclude_apps:  packExclude.join(','),
+    pack_name: packNameVal,
     trigger_build:      String(triggerBuild),
     build_arch:         arch,
   };
