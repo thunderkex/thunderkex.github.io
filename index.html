@@ -299,6 +299,35 @@
     flex-shrink: 0; transition: border-color .12s, color .12s;
   }
   .ht-btn:hover { border-color: var(--blue); color: var(--blue); }
+
+  /* ── Steps log view ── */
+  .bp-steps {
+    margin-top: 12px;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+  }
+  .bp-steps-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .bp-steps-title {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--text2);
+  }
+  .bp-job-name {
+    font-size: 11px; font-weight: 700; color: var(--text);
+    margin: 6px 0 3px; padding-left: 2px;
+  }
+  .bp-step {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; padding: 2px 0; color: var(--text2);
+    padding-left: 8px;
+  }
+  .bp-step.step-active  { color: var(--blue); }
+  .bp-step.step-fail    { color: var(--red); }
+  .bp-step-icon  { width: 13px; text-align: center; flex-shrink: 0; font-style: normal; }
+  .bp-step-name  { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bp-step-dur   { color: var(--text2); flex-shrink: 0; font-size: 10px; }
 </style>
 </head>
 <body>
@@ -337,8 +366,12 @@
   </div>
 
   <div id="history-section" style="display:none">
-    <div class="section-title">Actions History</div>
+    <div class="section-title" style="justify-content:space-between">
+      <span>Actions History</span>
+      <button class="btn-sm" onclick="loadRecentRuns()" id="ht-refresh-btn" style="font-size:11px;padding:3px 10px">↻ Refresh</button>
+    </div>
     <div id="ht-body"></div>
+    <div id="ht-recent"></div>
   </div>
 </div>
 
@@ -383,6 +416,12 @@
     </div>
     <div id="bp-links" class="build-links"></div>
     <div class="build-progress"><div class="build-progress-bar" id="bp-bar"></div></div>
+    <div class="bp-steps" id="bp-steps" style="display:none">
+      <div class="bp-steps-header">
+        <span class="bp-steps-title">Steps</span>
+      </div>
+      <div id="bp-steps-body"></div>
+    </div>
   </div>
 </div>
 
@@ -525,6 +564,7 @@ function renderApps() {
 
   updateInfo();
   $('header-sub').textContent = `${APPS.length} apps loaded from ${REPO}`;
+  loadRecentRuns();
 }
 
 function makeCard(app) {
@@ -693,11 +733,55 @@ async function applyConfig() {
 let _monitorTimer = null;
 let BUILD_HISTORY = [];
 let _currentHistoryId = null;
+let RECENT_RUNS = [];
+const STORAGE_KEY = 'revpack_build_state';
+
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      history: BUILD_HISTORY,
+      currentId: _currentHistoryId,
+      repo: REPO,
+      branch: BRANCH
+    }));
+  } catch (_) {}
+}
+
+function initState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data.history) || data.history.length === 0) return;
+    BUILD_HISTORY = data.history;
+    _currentHistoryId = data.currentId || null;
+    if (data.repo)   REPO   = data.repo;
+    if (data.branch) BRANCH = data.branch;
+  } catch (_) { return; }
+
+  updateHistoryTab();
+  loadRecentRuns();
+
+  const entry = _currentHistoryId ? BUILD_HISTORY.find(e => e.id === _currentHistoryId) : null;
+  if (!entry) return;
+
+  if (!entry.minimized) showBuildPanel(entry.state, entry.run, entry.assets);
+
+  if (entry.state === 'searching') {
+    entry.state = 'not-found';
+    saveState();
+    if (!entry.minimized) showBuildPanel('not-found', null, null);
+    else updateHistoryTab();
+  } else if ((entry.state === 'queued' || entry.state === 'in_progress') && entry.run) {
+    _monitorTimer = setTimeout(() => pollRunStatus(entry.run.id), 5000);
+  }
+}
 
 function closeBuildPanel() {
   clearTimeout(_monitorTimer);
   $('build-panel').style.display = 'none';
   _currentHistoryId = null;
+  saveState();
 }
 
 function minimizeBuildPanel() {
@@ -705,6 +789,7 @@ function minimizeBuildPanel() {
   if (entry) entry.minimized = true;
   $('build-panel').style.display = 'none';
   updateHistoryTab();
+  saveState();
 }
 
 function restoreBuildFromHistory(id) {
@@ -714,6 +799,7 @@ function restoreBuildFromHistory(id) {
   entry.minimized = false;
   showBuildPanel(entry.state, entry.run, entry.assets);
   updateHistoryTab();
+  saveState();
 }
 
 function generateId() {
@@ -724,11 +810,8 @@ function updateHistoryTab() {
   const body = $('ht-body');
   const section = $('history-section');
   const entries = BUILD_HISTORY.filter(e => e.minimized);
-  section.style.display = entries.length > 0 ? '' : 'none';
-  if (entries.length === 0) {
-    body.innerHTML = '';
-    return;
-  }
+  const hasAny = entries.length > 0 || RECENT_RUNS.length > 0;
+  section.style.display = hasAny ? '' : 'none';
   const icons = { searching:'🔍', queued:'⏳', in_progress:'🔄', success:'✅', failure:'❌', cancelled:'⚠️', 'not-found':'❓' };
   const labels = { searching:'Searching…', queued:'Queued', in_progress:'In progress…', success:'Succeeded', failure:'Failed', cancelled:'Cancelled', 'not-found':'Not found' };
   body.innerHTML = '';
@@ -742,6 +825,28 @@ function updateHistoryTab() {
     div.innerHTML = `<span class="ht-icon">${icons[e.state]||'⏳'}</span><div class="ht-info"><div class="ht-label">${labels[e.state]||e.state}</div><div class="ht-sub">${sub}</div></div><button class="ht-btn" onclick="restoreBuildFromHistory('${e.id}')">Restore</button>`;
     body.appendChild(div);
   }
+  renderRecentRuns();
+}
+
+function renderRecentRuns() {
+  const el = $('ht-recent');
+  if (!el) return;
+  if (RECENT_RUNS.length === 0) { el.innerHTML = ''; return; }
+  const stateOf = r => r.status === 'completed' ? r.conclusion : r.status;
+  const icons = { queued:'⏳', in_progress:'🔄', success:'✅', failure:'❌', cancelled:'⚠️', timed_out:'⏱️', skipped:'⏭️' };
+  const labels = { queued:'Queued', in_progress:'In progress', success:'Succeeded', failure:'Failed', cancelled:'Cancelled', timed_out:'Timed out', skipped:'Skipped' };
+  el.innerHTML = '<div style="font-size:11px;color:var(--text2);font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin:16px 0 8px">Recent runs</div>';
+  for (const r of RECENT_RUNS) {
+    const s = stateOf(r);
+    const icon = icons[s] || '⏳';
+    const label = labels[s] || s;
+    const date = new Date(r.created_at).toLocaleString();
+    const div = document.createElement('div');
+    div.className = 'ht-entry';
+    div.style.flexWrap = 'wrap';
+    div.innerHTML = `<span class="ht-icon">${icon}</span><div class="ht-info"><div class="ht-label">Run #${r.run_number} — ${label}</div><div class="ht-sub">${date} · ${r.head_commit?.message?.split('\n')[0] || ''}</div></div><button class="ht-btn" onclick="toggleRunSteps(this,'${r.id}')">Steps</button><div class="ht-steps" id="ht-steps-${r.id}" style="display:none;width:100%;margin-top:8px;font-size:11px;padding-left:4px"><span style="color:var(--text2)">Loading…</span></div>`;
+    el.appendChild(div);
+  }
 }
 
 function updateHistoryEntry(id, state, run, assets) {
@@ -749,6 +854,7 @@ function updateHistoryEntry(id, state, run, assets) {
   if (!e) return;
   e.state = state; e.run = run; e.assets = assets;
   if (e.minimized) updateHistoryTab();
+  saveState();
 }
 
 function showBuildPanel(state, run, assets) {
@@ -826,6 +932,98 @@ function showBuildPanel(state, run, assets) {
     linksEl.appendChild(a);
   }
   if (_currentHistoryId) updateHistoryEntry(_currentHistoryId, state, run, assets);
+
+  if (run) fetchAndShowSteps(run.id);
+  else { const s = $('bp-steps'); if (s) s.style.display = 'none'; }
+}
+
+async function fetchAndShowSteps(runId) {
+  try {
+    const data = await apiGet(`https://api.github.com/repos/${REPO}/actions/runs/${runId}/jobs?per_page=10`);
+    const jobs = (data.jobs || []).filter(j => j.status !== 'queued' || (j.steps && j.steps.length > 0));
+    if (!jobs.length) return;
+    const iconOf = s => {
+      if (s.status === 'in_progress') return '<i class="bp-step-icon" style="color:var(--blue)">▶</i>';
+      if (s.conclusion === 'success')  return '<i class="bp-step-icon" style="color:var(--green)">✓</i>';
+      if (s.conclusion === 'failure')  return '<i class="bp-step-icon" style="color:var(--red)">✗</i>';
+      if (s.conclusion === 'skipped')  return '<i class="bp-step-icon" style="color:var(--text2)">—</i>';
+      return '<i class="bp-step-icon">○</i>';
+    };
+    const classOf = s => {
+      if (s.status === 'in_progress') return 'step-active';
+      if (s.conclusion === 'failure') return 'step-fail';
+      return '';
+    };
+    let html = '';
+    for (const job of jobs) {
+      const jIcon = job.status === 'in_progress' ? '🔄'
+        : job.conclusion === 'success' ? '✅'
+        : job.conclusion === 'failure' ? '❌'
+        : '⏳';
+      html += `<div class="bp-job-name">${jIcon} ${job.name}</div>`;
+      for (const step of (job.steps || [])) {
+        const dur = step.completed_at && step.started_at
+          ? `${Math.round((new Date(step.completed_at) - new Date(step.started_at)) / 1000)}s` : '';
+        html += `<div class="bp-step ${classOf(step)}">${iconOf(step)}<span class="bp-step-name">${step.name}</span>${dur ? `<span class="bp-step-dur">${dur}</span>` : ''}</div>`;
+      }
+    }
+    const body = $('bp-steps-body');
+    const section = $('bp-steps');
+    if (body) body.innerHTML = html;
+    if (section) section.style.display = '';
+  } catch (_) {}
+}
+
+async function toggleRunSteps(btn, runId) {
+  const el = $('ht-steps-' + runId);
+  if (!el) return;
+  if (el.style.display !== 'none') {
+    el.style.display = 'none';
+    btn.textContent = 'Steps';
+    return;
+  }
+  el.style.display = '';
+  btn.textContent = 'Hide';
+  try {
+    const data = await apiGet(`https://api.github.com/repos/${REPO}/actions/runs/${runId}/jobs?per_page=10`);
+    const jobs = data.jobs || [];
+    const iconOf = s => {
+      if (s.status === 'in_progress') return '<span style="color:var(--blue)">▶</span>';
+      if (s.conclusion === 'success')  return '<span style="color:var(--green)">✓</span>';
+      if (s.conclusion === 'failure')  return '<span style="color:var(--red)">✗</span>';
+      if (s.conclusion === 'skipped')  return '<span style="color:var(--text2)">—</span>';
+      return '<span>○</span>';
+    };
+    let html = '';
+    for (const job of jobs) {
+      html += `<div style="font-weight:700;margin:6px 0 3px">${job.name}</div>`;
+      for (const step of (job.steps || [])) {
+        const dur = step.completed_at && step.started_at
+          ? ` <span style="color:var(--text2);font-size:10px">${Math.round((new Date(step.completed_at) - new Date(step.started_at))/1000)}s</span>` : '';
+        const col = step.status === 'in_progress' ? 'var(--blue)' : step.conclusion === 'failure' ? 'var(--red)' : 'var(--text2)';
+        html += `<div style="display:flex;gap:6px;padding:2px 0 2px 8px;color:${col}">${iconOf(step)}<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${step.name}</span>${dur}</div>`;
+      }
+    }
+    el.innerHTML = html || '<span style="color:var(--text2)">No steps found.</span>';
+  } catch (e) {
+    el.innerHTML = `<span style="color:var(--red)">Failed to load steps.</span>`;
+  }
+}
+
+async function loadRecentRuns() {
+  if (!REPO) return;
+  const btn = $('ht-refresh-btn');
+  if (btn) btn.disabled = true;
+  try {
+    const data = await apiGet(
+      `https://api.github.com/repos/${REPO}/actions/workflows/ci.yml/runs?per_page=10&branch=${encodeURIComponent(BRANCH)}`
+    );
+    RECENT_RUNS = data.workflow_runs || [];
+    $('history-section').style.display = RECENT_RUNS.length > 0 ? '' : ($('history-section').style.display);
+    renderRecentRuns();
+    if (RECENT_RUNS.length > 0) $('history-section').style.display = '';
+  } catch (_) {}
+  if (btn) btn.disabled = false;
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -842,6 +1040,7 @@ async function startBuildMonitor(triggeredAt) {
   const id = generateId();
   BUILD_HISTORY.push({ id, triggeredAt, state: 'searching', run: null, assets: null, minimized: false });
   _currentHistoryId = id;
+  saveState();
   showBuildPanel('searching', null, null);
   await sleep(12000);
   pollForRun(triggeredAt, 0);
@@ -902,6 +1101,8 @@ async function handleRunComplete(run) {
     showBuildPanel(run.conclusion === 'cancelled' ? 'cancelled' : 'failure', run, null);
   }
 }
+
+initState();
 </script>
 </body>
 </html>
