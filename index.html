@@ -752,6 +752,11 @@ function updateHistoryEntry(id, state, run, assets) {
 }
 
 function showBuildPanel(state, run, assets) {
+  const entry = BUILD_HISTORY.find(e => e.id === _currentHistoryId);
+  if (entry && entry.minimized) {
+    updateHistoryEntry(_currentHistoryId, state, run, assets);
+    return;
+  }
   const panel = $('build-panel');
   panel.style.display = '';
   panel.className = 'build-panel bp-' + state.replace('_', '-');
