@@ -141,6 +141,20 @@
     transition: border-color .15s;
   }
   .card.disabled-card { opacity: .55; }
+  .card-header {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .app-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    object-fit: cover; flex-shrink: 0;
+    background: var(--surface2);
+  }
+  .app-icon-fallback {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 800; color: #fff; flex-shrink: 0;
+    text-transform: uppercase; letter-spacing: 0;
+  }
   .card-name {
     font-weight: 700; font-size: 14px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -577,10 +591,15 @@ function makeCard(app) {
   const modTag = app.patchesSource && !app.patchesSource.startsWith('ReVanced/')
     ? `<span class="tag tag-mod" title="${app.patchesSource}">mod</span>` : '';
 
+  const iconHtml = appIconHtml(app.name);
+
   div.innerHTML = `
-    <div>
-      <div class="card-name">${app.name}${devTag}${modTag}</div>
-      <div class="card-meta">mode: ${app.buildMode}${app.patchesSource ? ' · ' + app.patchesSource.split('/')[0] : ''}</div>
+    <div class="card-header">
+      ${iconHtml}
+      <div style="min-width:0">
+        <div class="card-name">${app.name}${devTag}${modTag}</div>
+        <div class="card-meta">mode: ${app.buildMode}${app.patchesSource ? ' · ' + app.patchesSource.split('/')[0] : ''}</div>
+      </div>
     </div>
     <div class="toggle-row">
       <span class="toggle-label">Build</span>
@@ -602,6 +621,87 @@ function makeCard(app) {
 }
 
 function slug(name) { return name.replace(/[^a-zA-Z0-9]/g, '-'); }
+
+const APP_DOMAINS = [
+  [/youtube music|yt music|\bmusic\b/i, 'music.youtube.com'],
+  [/youtube/i,                     'youtube.com'],
+  [/reddit/i,                      'reddit.com'],
+  [/twitter|\bx\b.*app|piko*/i,          'x.com'],
+  [/tiktok/i,                      'tiktok.com'],
+  [/spotify/i,                     'spotify.com'],
+  [/twitch/i,                      'twitch.tv'],
+  [/instagram/i,                   'instagram.com'],
+  [/threads/i,                     'threads.com'],
+  [/duolingo/i,                    'duolingo.com'],
+  [/netflix/i,                     'netflix.com'],
+  [/prime\s*video|primevideo/i,    'primevideo.com'],
+  [/amazon music/i,                'music.amazon.com'],
+  [/backdrops/i,                   'backdrops.app'],
+  [/strava/i,                      'strava.com'],
+  [/ticktick/i,                    'ticktick.com'],
+  [/sync.*reddit|sync/i,           'reddit.com'],
+  [/revanced manager|rvx manager/i,'revanced.app'],
+  [/nova launcher/i,               'novalauncher.com'],
+  [/snapseed/i,                    'snapseed.com'],
+  [/pinterest/i,                   'pinterest.com'],
+  [/tumblr/i,                      'tumblr.com'],
+  [/trello/i,                      'trello.com'],
+  [/myfitnesspal/i,                'myfitnesspal.com'],
+  [/inshot/i,                      'inshot.com'],
+  [/vsco/i,                        'vsco.co'],
+  [/waze/i,                        'waze.com'],
+  [/soundcloud/i,                  'soundcloud.com'],
+  [/aliexpress/i,                  'aliexpress.com'],
+  [/shein/i,                       'shein.com'],
+  [/lightroom/i,                   'lightroom.adobe.com'],
+  [/picsart/i,                     'picsart.com'],
+  [/discord/i,                     'discord.com'],
+  [/telegram/i,                    'telegram.org'],
+  [/whatsapp/i,                    'whatsapp.com'],
+  [/messenger/i,                   'messenger.com'],
+  [/snapchat/i,                    'snapchat.com'],
+  [/linkedin/i,                    'linkedin.com'],
+  [/gmail/i,                       'gmail.com'],
+  [/chrome/i,                      'google.com/chrome'],
+  [/maps/i,                        'maps.google.com'],
+  [/gphotos|google\s*photos/i,     'photos.google.com'],
+  [/google drive/i,                'drive.google.com'],
+  [/google play/i,                 'play.google.com'],
+  [/facebook/i,                    'facebook.com'],
+  [/paypal/i,                      'paypal.com'],
+  [/uber/i,                        'uber.com'],
+  [/zoom/i,                        'zoom.us'],
+  [/viber/i,                       'viber.com'],
+  [/skype/i,                       'skype.com'],
+  [/shazam/i,                      'shazam.com'],
+  [/canva/i,                       'canva.com'],
+  [/grammarly/i,                   'grammarly.com'],
+  [/dropbox/i,                     'dropbox.com'],
+];
+
+const AVATAR_COLORS = [
+  '#e53935','#d81b60','#8e24aa','#5e35b1','#3949ab',
+  '#1e88e5','#039be5','#00897b','#43a047','#fb8c00',
+];
+
+function appIconFallback(img, letter, color) {
+  const div = document.createElement('div');
+  div.className = 'app-icon-fallback';
+  div.style.background = color;
+  div.textContent = letter;
+  img.parentNode.replaceChild(div, img);
+}
+
+function appIconHtml(name) {
+  const matched = APP_DOMAINS.find(([re]) => re.test(name));
+  const letter = (name.trim()[0] || '?').toUpperCase();
+  const color = AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length];
+  if (!matched) {
+    return `<div class="app-icon-fallback" style="background:${color}">${letter}</div>`;
+  }
+  const domain = matched[1];
+  return `<img class="app-icon" src="https://www.google.com/s2/favicons?domain=${domain}&sz=64" alt="" onerror="appIconFallback(this,'${letter}','${color}')">`;
+}
 
 function onBuildToggle(name, checked) {
   const app = APPS.find(a => a.name === name);
